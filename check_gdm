@@ -1,0 +1,66 @@
+sudo systemctl status ckgdm
+
+##--------------------------------------------------------------------------------------------------------------------
+/usr/local/sbin/ckgdm
+#!/bin/bash
+
+SERVICE_NAME="gdm"
+ERROR_PATTERN="GDM_IS_REMOTE_DISPLAY"
+CHECK_INTERVAL=5          # seconds between checks
+COOLDOWN=15               # seconds between restarts (prevents loops)
+LAST_RESTART=0
+LOG_TAG="gdm-monitor"
+
+echo "Starting GDM monitor loop..." | systemd-cat -t $LOG_TAG
+exit 0
+while true; do
+
+    # Check for error in last 2 minutes
+    if journalctl -u $SERVICE_NAME --since "2 minutes ago" | grep -q "$ERROR_PATTERN"; then
+        
+        NOW=$(date +%s)
+
+        # Prevent restart storm
+        if (( NOW - LAST_RESTART < COOLDOWN )); then
+            echo "Cooldown active. Skipping restart." | systemd-cat -t $LOG_TAG
+        else
+            echo "GDM assertion error detected." | systemd-cat -t $LOG_TAG
+
+            # Check if any user session exists
+            #if loginctl list-sessions --no-legend | grep -q .; then
+	    if journalctl -b -u gdm --no-pager | grep -Ei "fail|error|segfault|core-dump" -q; then
+                echo "Restarting GDM..." | systemd-cat -t $LOG_TAG
+#                systemctl restart $SERVICE_NAME
+            else
+                echo "Active session detected. Stopping cchecker.service..." | systemd-cat -t $LOG_TAG
+#                systemctl stop ckgdm
+                exit 0
+
+            fi
+            LAST_RESTART=$NOW
+        fi
+    fi
+    sleep $CHECK_INTERVAL
+done
+
+##--------------------------------------------------------------------------------------------------------------------
+
+/etc/systemd/system/ckgdm.service
+[Unit]
+Description=Check/restart GDM
+Requisite=gdm.service
+After=gdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ckgdm
+
+[Install]
+WantedBy=gdm.service
+
+##--------------------------------------------------------------------------------------------------------------------
+
+
+##--------------------------------------------------------------------------------------------------------------------
+
+
